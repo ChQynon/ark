@@ -533,12 +533,50 @@ if (IS_VERCEL && WEBHOOK_URL) {
   const app = express();
   app.use(express.json());
   
-  // Handle webhook
-  app.use(`/api/webhook`, webhookCallback(bot, 'express'));
+  // Обработка вебхуков с более общим маршрутом
+  app.use('/api/webhook', (req, res, next) => {
+    console.log('Получен запрос вебхука:', req.method, req.url);
+    return webhookCallback(bot, 'express')(req, res, next);
+  });
+
+  // Добавляем эндпоинт, который просто подтверждает, что бот активен
+  app.post('/api/webhook', (req, res) => {
+    console.log('Получен POST запрос на /api/webhook');
+    res.status(200).json({ ok: true, message: 'Webhook received' });
+  });
+
+  // Эндпоинт для ручной активации вебхука через браузер
+  app.get('/api/setwebhook', async (req, res) => {
+    try {
+      const result = await bot.api.setWebhook(WEBHOOK_URL);
+      console.log('Результат установки вебхука:', result);
+      res.status(200).json({ ok: true, result });
+    } catch (error) {
+      console.error('Ошибка при установке вебхука:', error);
+      res.status(500).json({ ok: false, error: String(error) });
+    }
+  });
   
   // Health check endpoint
   app.get('/api/health', (req, res) => {
-    res.status(200).json({ status: 'ok', bot: BOT_NAME, platform: BOT_PLATFORM });
+    res.status(200).json({ 
+      status: 'ok', 
+      bot: BOT_NAME,
+      platform: BOT_PLATFORM,
+      webhook: WEBHOOK_URL || 'not set'
+    });
+  });
+
+  // Catch-all маршрут
+  app.get('/*', (req, res) => {
+    res.status(200).json({ 
+      message: `${BOT_NAME} бот работает!`,
+      endpoints: [
+        "/api/webhook - Telegram webhook endpoint",
+        "/api/health - Health check",
+        "/api/setwebhook - Manually set webhook URL"
+      ]
+    });
   });
   
   // Start Express server
@@ -546,11 +584,14 @@ if (IS_VERCEL && WEBHOOK_URL) {
     console.log(`Сервер запущен на порту ${PORT}`);
     console.log(`${BOT_NAME} на базе ${BOT_PLATFORM}, создан компанией ${BOT_CREATOR}`);
     console.log(`Режим вебхуков для Vercel активирован`);
+    console.log(`WEBHOOK_URL: ${WEBHOOK_URL}`);
     
     // Set webhook
-    bot.api.setWebhook(WEBHOOK_URL)
-      .then(() => console.log(`Вебхук установлен на ${WEBHOOK_URL}`))
-      .catch(e => console.error('Ошибка при установке вебхука:', e));
+    if (WEBHOOK_URL) {
+      bot.api.setWebhook(WEBHOOK_URL)
+        .then(() => console.log(`Вебхук установлен на ${WEBHOOK_URL}`))
+        .catch(e => console.error('Ошибка при установке вебхука:', e));
+    }
   });
 } else {
   // Use long polling for local development

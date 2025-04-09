@@ -8,11 +8,17 @@
   ],
   "routes": [
     {
-      "src": "/api/webhook",
-      "dest": "dist/index.js"
+      "src": "/api/webhook(.*)",
+      "dest": "dist/index.js",
+      "methods": ["POST", "GET"]
     },
     {
       "src": "/api/health",
+      "dest": "dist/index.js",
+      "methods": ["GET"]
+    },
+    {
+      "src": "/(.*)",
       "dest": "dist/index.js"
     }
   ],
