@@ -9,6 +9,10 @@ const BOT_NAME = "ARK-1";
 const BOT_PLATFORM = "PLEXY";
 const BOT_CREATOR = "@samgay_nis";
 
+// Проверка режима запуска (Vercel/локальный)
+const IS_VERCEL = process.env.VERCEL === "1";
+const WEBHOOK_URL = process.env.WEBHOOK_URL;
+
 // Получаем токены
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
@@ -175,6 +179,32 @@ bot.on('message:photo', async (ctx) => {
   }
 });
 
-// Запуск бота
-bot.start();
-console.log('Бот запущен в режиме long polling!'); 
+// Функция для обработки вебхуков
+async function handleWebhook(req: any, res: any) {
+  try {
+    // Обрабатываем запрос от Telegram
+    if (req.body) {
+      await bot.handleUpdate(req.body);
+    }
+  } catch (error) {
+    console.error('Ошибка обработки вебхука:', error);
+  }
+}
+
+// Запуск бота в зависимости от режима
+if (IS_VERCEL) {
+  console.log(`Бот запущен в режиме вебхуков на ${WEBHOOK_URL}`);
+  // Экспорт для Vercel
+  module.exports = async (req: any, res: any) => {
+    // Сразу отвечаем OK для избежания таймаутов
+    res.status(200).send('OK');
+    // Асинхронно обрабатываем запрос
+    handleWebhook(req, res).catch(error => {
+      console.error('Ошибка при асинхронной обработке вебхука:', error);
+    });
+  };
+} else {
+  // Запуск в режиме long polling для локальной разработки
+  bot.start();
+  console.log('Бот запущен в режиме long polling!');
+} 
