@@ -24,22 +24,18 @@
 ## Ручная настройка
 
 1. Убедитесь, что у вас установлен Node.js (рекомендуется версия 16 или выше)
-
 2. Установите зависимости:
    ```
    npm install
    ```
-
 3. Настройте переменные окружения:
    - Скопируйте `.env.example` в `.env`
    - Файл `.env` уже содержит токен бота Telegram и ключ API OpenRouter
    - При необходимости можно изменить `YOUR_SITE_URL` и `YOUR_SITE_NAME`
-
 4. Соберите проект:
    ```
    npm run build
    ```
-
 5. Запустите бота:
    ```
    npm start
@@ -50,15 +46,12 @@
 Для размещения бота на Vercel:
 
 1. Форкните или клонируйте репозиторий на GitHub
-
 2. Создайте новый проект на Vercel, связав его с вашим GitHub репозиторием
-
 3. Установите следующие переменные окружения в настройках проекта Vercel:
    - `TELEGRAM_BOT_TOKEN` - токен вашего Telegram бота
    - `OPENROUTER_API_KEY` - ключ API OpenRouter
    - `WEBHOOK_URL` - URL вашего приложения на Vercel + "/api/webhook" (например, https://ark-bot.vercel.app/api/webhook)
    - `VERCEL` - установите значение "1"
-
 4. После деплоя на Vercel, установите вебхук для вашего Telegram бота:
    ```
    curl -X POST https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook?url=<WEBHOOK_URL>
@@ -88,6 +81,8 @@
 ```
 ├── src/                   # Исходный код
 │   └── index.ts           # Основной файл бота
+├── api/                   # API endpoints для Vercel
+│   └── webhook.js         # Обработчик вебхуков Telegram
 ├── .env                   # Переменные окружения (не включены в репозиторий)
 ├── .env.example           # Пример файла с переменными окружения
 ├── vercel.json            # Конфигурация для деплоя на Vercel

@@ -4,10 +4,6 @@
     {
       "src": "api/webhook.js",
       "use": "@vercel/node"
-    },
-    {
-      "src": "api/health.js",
-      "use": "@vercel/node"
     }
   ],
   "routes": [
@@ -16,15 +12,14 @@
       "dest": "/api/webhook.js"
     },
     {
-      "src": "/api/health",
-      "dest": "/api/health.js"
-    },
-    {
       "src": "/(.*)",
-      "dest": "/api/health.js"
+      "dest": "/api/webhook.js"
     }
   ],
-  "env": {
-    "VERCEL": "1"
+  "functions": {
+    "api/webhook.js": {
+      "memory": 1024,
+      "maxDuration": 10
+    }
   }
 } 
