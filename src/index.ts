@@ -108,7 +108,7 @@ function isDuplicateMessage(chatId: number, userId: number, text: string): boole
   
   // Очистка старых записей
   if (processedMessages.size > 1000) {
-    const keysToDelete = [];
+    const keysToDelete: string[] = [];
     for (const [storedKey, timestamp] of processedMessages.entries()) {
       if (now - timestamp > DUPLICATE_MESSAGE_TIMEOUT) {
         keysToDelete.push(storedKey);
@@ -575,11 +575,16 @@ async function callOpenRouterAPI(chatHistory: SessionData['chatHistory']): Promi
       messagesCount: messages.length
     });
     
+    // Используем более длительный таймаут для надежности
+    const timeout = 40000; // 40 секунд
+    
     const response = await axios.post(
       'https://openrouter.ai/api/v1/chat/completions',
       {
         model: 'meta-llama/llama-4-maverick:free',
-        messages: messages
+        messages: messages,
+        max_tokens: 1000, // Ограничиваем размер ответа
+        temperature: 0.7 // Добавляем немного случайности
       },
       {
         headers: {
@@ -588,19 +593,44 @@ async function callOpenRouterAPI(chatHistory: SessionData['chatHistory']): Promi
           'X-Title': YOUR_SITE_NAME,
           'Content-Type': 'application/json',
         },
-        timeout: API_TIMEOUT_TEXT // 20 секунд таймаут
+        timeout: timeout
       }
     );
 
-    if (!response.data || !response.data.choices || !response.data.choices[0]) {
-      console.error('Некорректный ответ от OpenRouter API:', response.data);
-      return 'Нет ответа от ИИ';
+    // Проверяем результат
+    if (!response || !response.data) {
+      console.error('Пустой ответ от OpenRouter API');
+      return 'Нет ответа от ИИ. Пожалуйста, попробуйте еще раз.';
     }
 
-    return response.data.choices[0].message.content || 'Нет ответа от ИИ';
-  } catch (error) {
+    if (!response.data.choices || response.data.choices.length === 0) {
+      console.error('Нет вариантов ответа в ответе API:', response.data);
+      return 'ИИ не смог сформировать ответ. Пожалуйста, попробуйте еще раз.';
+    }
+
+    const content = response.data.choices[0].message?.content;
+    
+    if (!content) {
+      console.error('Пустой контент в ответе API:', response.data.choices[0]);
+      return 'Получен пустой ответ от ИИ. Пожалуйста, попробуйте еще раз.';
+    }
+
+    return content;
+  } catch (error: any) {
     console.error('Ошибка при вызове OpenRouter API:', error);
-    throw new Error('Не удалось получить ответ от сервиса ИИ');
+    
+    // Обрабатываем тайм-аут отдельно
+    if (error.code === 'ECONNABORTED' || (error.message && error.message.includes('timeout'))) {
+      return 'Извините, запрос к ИИ занял слишком много времени. Пожалуйста, попробуйте еще раз или задайте более короткий вопрос.';
+    }
+    
+    // Если ошибка связана с API
+    if (error.response) {
+      console.error('Ошибка API:', error.response.status, error.response.data);
+      return `Сервис ИИ вернул ошибку: ${error.response.status}. Пожалуйста, попробуйте позже.`;
+    }
+    
+    return 'Извините, произошла ошибка при обращении к сервису ИИ. Пожалуйста, попробуйте еще раз позже.';
   }
 }
 
@@ -632,11 +662,16 @@ async function callOpenRouterAPIWithImage(chatHistory: SessionData['chatHistory'
       imageUrl: imageUrl.substring(0, 50) + '...' // Укороченный URL для лога
     });
     
+    // Используем более длительный таймаут для изображений
+    const timeout = 60000; // 60 секунд для изображений
+    
     const response = await axios.post(
       'https://openrouter.ai/api/v1/chat/completions',
       {
         model: 'meta-llama/llama-4-maverick:free',
-        messages: filteredMessages
+        messages: filteredMessages,
+        max_tokens: 1500, // Увеличиваем для изображений
+        temperature: 0.7 // Добавляем немного случайности
       },
       {
         headers: {
@@ -645,19 +680,50 @@ async function callOpenRouterAPIWithImage(chatHistory: SessionData['chatHistory'
           'X-Title': YOUR_SITE_NAME,
           'Content-Type': 'application/json',
         },
-        timeout: API_TIMEOUT_IMAGE // 30 секунд таймаут
+        timeout: timeout
       }
     );
 
-    if (!response.data || !response.data.choices || !response.data.choices[0]) {
-      console.error('Некорректный ответ от OpenRouter API:', response.data);
-      return 'Нет ответа от ИИ';
+    // Проверяем результат более тщательно
+    if (!response || !response.data) {
+      console.error('Пустой ответ от OpenRouter API при обработке изображения');
+      return 'Нет ответа от ИИ. Пожалуйста, попробуйте еще раз с другим изображением.';
     }
 
-    return response.data.choices[0].message.content || 'Нет ответа от ИИ';
-  } catch (error) {
+    if (!response.data.choices || response.data.choices.length === 0) {
+      console.error('Нет вариантов ответа для изображения:', response.data);
+      return 'ИИ не смог распознать или проанализировать изображение. Пожалуйста, попробуйте другое изображение.';
+    }
+
+    const content = response.data.choices[0].message?.content;
+    
+    if (!content) {
+      console.error('Пустой контент в ответе API для изображения:', response.data.choices[0]);
+      return 'Получен пустой ответ от ИИ при анализе изображения. Пожалуйста, попробуйте другое изображение.';
+    }
+
+    return content;
+  } catch (error: any) {
     console.error('Ошибка при вызове OpenRouter API с изображением:', error);
-    throw new Error('Не удалось получить ответ от сервиса ИИ для анализа изображения');
+    
+    // Обрабатываем тайм-аут отдельно
+    if (error.code === 'ECONNABORTED' || (error.message && error.message.includes('timeout'))) {
+      return 'Извините, анализ изображения занял слишком много времени. Пожалуйста, попробуйте изображение меньшего размера или с менее сложным содержимым.';
+    }
+    
+    // Если ошибка связана с API
+    if (error.response) {
+      console.error('Ошибка API при обработке изображения:', error.response.status, error.response.data);
+      
+      // Проверяем конкретные ошибки размера
+      if (error.response.status === 413 || (error.response.data && error.response.data.includes('payload too large'))) {
+        return 'Изображение слишком большое для обработки. Пожалуйста, используйте изображение меньшего размера.';
+      }
+      
+      return `Сервис ИИ вернул ошибку при обработке изображения: ${error.response.status}. Пожалуйста, попробуйте позже.`;
+    }
+    
+    return 'Извините, произошла ошибка при обработке изображения. Пожалуйста, попробуйте другое изображение или повторите попытку позже.';
   }
 }
 
@@ -772,7 +838,7 @@ setInterval(() => {
   
   // Очистка кеша текстовых сообщений
   const now = Date.now();
-  const keysToDelete = [];
+  const keysToDelete: string[] = [];
   for (const [key, timestamp] of processedMessages.entries()) {
     if (now - timestamp > DUPLICATE_MESSAGE_TIMEOUT) {
       keysToDelete.push(key);
