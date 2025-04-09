@@ -1,0 +1,25 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "dist/index.js",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/webhook",
+      "dest": "dist/index.js"
+    },
+    {
+      "src": "/api/health",
+      "dest": "dist/index.js"
+    }
+  ],
+  "env": {
+    "VERCEL": "1"
+  },
+  "github": {
+    "silent": true
+  }
+} 
