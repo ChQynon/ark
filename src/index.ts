@@ -1,17 +1,8 @@
-import { Bot, Context, session, SessionFlavor, Keyboard } from 'grammy';
+import { Bot } from 'grammy';
 import * as dotenv from 'dotenv';
 import axios from 'axios';
 
 dotenv.config();
-
-// Базовые настройки бота
-const BOT_NAME = "ARK-1";
-const BOT_PLATFORM = "PLEXY";
-const BOT_CREATOR = "@samgay_nis";
-
-// Проверка режима запуска (Vercel/локальный)
-const IS_VERCEL = process.env.VERCEL === "1";
-const WEBHOOK_URL = process.env.WEBHOOK_URL;
 
 // Получаем токены
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -22,92 +13,57 @@ if (!TELEGRAM_BOT_TOKEN || !OPENROUTER_API_KEY) {
   process.exit(1);
 }
 
-// Клавиатура для бота
-function getMainKeyboard(): Keyboard {
-  return new Keyboard()
-    .text("❓ Задать вопрос")
-    .text("📸 Анализ изображения")
-    .row()
-    .text("ℹ️ О боте")
-    .text("🧹 Очистить историю")
-    .resized();
-}
-
 // Инициализация бота
 const bot = new Bot(TELEGRAM_BOT_TOKEN);
 
 // Обработка команды /start
 bot.command("start", async (ctx) => {
-  await ctx.reply(`👋 Привет! Я ${BOT_NAME}, ИИ-ассистент на базе ${BOT_PLATFORM}.\nСоздан компанией ${BOT_CREATOR}.\nЯ могу ответить на ваши вопросы и обработать изображения.`, {
-    reply_markup: getMainKeyboard(),
-  });
-});
-
-// О боте
-bot.hears("ℹ️ О боте", async (ctx) => {
-  await ctx.reply(`ℹ️ *О боте*\n\nЯ ${BOT_NAME}, ИИ-ассистент на базе ${BOT_PLATFORM}.\nСоздан компанией ${BOT_CREATOR}.`, {
-    parse_mode: "Markdown",
-    reply_markup: getMainKeyboard(),
-  });
+  await ctx.reply(`👋 Привет! Я ARK-1, ИИ-ассистент. Отправь мне сообщение или фото.`);
 });
 
 // Обработка обычных текстовых сообщений
 bot.on('message:text', async (ctx) => {
-  // Пропускаем команды и кнопки
+  // Пропускаем команды
   const text = ctx.message.text;
-  if (text.startsWith('/') || 
-      text === "❓ Задать вопрос" || 
-      text === "📸 Анализ изображения" || 
-      text === "ℹ️ О боте" || 
-      text === "🧹 Очистить историю") {
-    return;
-  }
+  if (text.startsWith('/')) return;
   
   try {
     // Показываем что печатаем
     await ctx.api.sendChatAction(ctx.chat.id, "typing");
     
-    // Формируем запрос к API
-    const messages = [
-      {
-        role: 'system',
-        content: `Ты ${BOT_NAME}, ИИ-ассистент на базе ${BOT_PLATFORM}. Отвечай на русском языке кратко и по делу.`
-      },
-      {
-        role: 'user',
-        content: text
-      }
-    ];
-    
-    // Отправляем запрос
+    // Быстрый запрос к API
     const response = await axios.post(
       'https://openrouter.ai/api/v1/chat/completions',
       {
         model: 'meta-llama/llama-4-maverick:free',
-        messages: messages,
-        max_tokens: 800
+        messages: [
+          {
+            role: 'system',
+            content: 'Ты ARK-1, ИИ-ассистент. Отвечай коротко и только по делу, без лишних слов. Пиши только на русском языке.'
+          },
+          {
+            role: 'user',
+            content: text
+          }
+        ],
+        max_tokens: 500
       },
       {
         headers: {
           'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
           'Content-Type': 'application/json',
         },
-        timeout: 20000
+        timeout: 15000 // Уменьшаем таймаут до 15 секунд
       }
     );
     
-    // Отвечаем пользователю
+    // Мгновенно отвечаем пользователю
     const responseText = response.data.choices[0].message.content || 'Нет ответа';
-    await ctx.reply(responseText, {
-      parse_mode: 'Markdown',
-      reply_markup: getMainKeyboard(),
-    });
+    await ctx.reply(responseText);
     
   } catch (error) {
     console.error('Ошибка:', error);
-    await ctx.reply('Извините, произошла ошибка. Попробуйте еще раз.', {
-      reply_markup: getMainKeyboard(),
-    });
+    await ctx.reply('Ошибка при обработке запроса. Попробуйте еще раз позже.');
   }
 });
 
@@ -117,13 +73,13 @@ bot.on('message:photo', async (ctx) => {
     // Показываем что печатаем
     await ctx.api.sendChatAction(ctx.chat.id, "typing");
     
-    // Получаем фото
+    // Получаем фото максимально быстро
     const photoInfo = ctx.message.photo;
     const fileId = photoInfo[photoInfo.length - 1].file_id;
     const fileInfo = await ctx.api.getFile(fileId);
     
     if (!fileInfo.file_path) {
-      throw new Error("Не удалось получить путь к файлу");
+      throw new Error("Не удалось получить файл");
     }
     
     // Формируем URL фото
@@ -132,79 +88,62 @@ bot.on('message:photo', async (ctx) => {
     // Получаем подпись или стандартный текст
     const caption = ctx.message.caption || "Опиши, что на этом изображении";
     
-    // Формируем сообщение с изображением
-    const messages = [
-      {
-        role: 'system',
-        content: `Ты ${BOT_NAME}, ИИ-ассистент на базе ${BOT_PLATFORM}. Отвечай на русском языке кратко и по делу.`
-      },
-      {
-        role: 'user',
-        content: [
-          { type: 'text', text: caption },
-          { type: 'image_url', image_url: { url: photoUrl } }
-        ]
-      }
-    ];
-    
-    // Отправляем запрос
+    // Отправляем простой запрос с изображением
     const response = await axios.post(
       'https://openrouter.ai/api/v1/chat/completions',
       {
         model: 'meta-llama/llama-4-maverick:free',
-        messages: messages,
-        max_tokens: 1000
+        messages: [
+          {
+            role: 'system',
+            content: 'Ты ARK-1, ИИ-ассистент. Отвечай кратко по делу и только на русском языке.'
+          },
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: caption },
+              { type: 'image_url', image_url: { url: photoUrl } }
+            ]
+          }
+        ],
+        max_tokens: 800
       },
       {
         headers: {
           'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
           'Content-Type': 'application/json',
         },
-        timeout: 25000
+        timeout: 20000 // Уменьшаем таймаут до 20 секунд
       }
     );
     
     // Отвечаем пользователю
     const responseText = response.data.choices[0].message.content || 'Нет ответа';
-    await ctx.reply(responseText, {
-      parse_mode: 'Markdown',
-      reply_markup: getMainKeyboard(),
-    });
+    await ctx.reply(responseText);
     
   } catch (error) {
     console.error('Ошибка при обработке изображения:', error);
-    await ctx.reply('Извините, произошла ошибка с изображением. Попробуйте еще раз.', {
-      reply_markup: getMainKeyboard(),
-    });
+    await ctx.reply('Ошибка при обработке изображения. Попробуйте другое фото или позже.');
   }
 });
 
-// Функция для обработки вебхуков
-async function handleWebhook(req: any, res: any) {
+// Обработка вебхуков от Telegram
+module.exports = async (req: any, res: any) => {
+  // Сразу отвечаем OK для избежания таймаутов
+  res.status(200).send('OK');
+  
+  // Обрабатываем запрос асинхронно
   try {
-    // Обрабатываем запрос от Telegram
     if (req.body) {
       await bot.handleUpdate(req.body);
     }
   } catch (error) {
-    console.error('Ошибка обработки вебхука:', error);
+    console.error('Ошибка вебхука:', error);
   }
-}
+};
 
-// Запуск бота в зависимости от режима
-if (IS_VERCEL) {
-  console.log(`Бот запущен в режиме вебхуков на ${WEBHOOK_URL}`);
-  // Экспорт для Vercel
-  module.exports = async (req: any, res: any) => {
-    // Сразу отвечаем OK для избежания таймаутов
-    res.status(200).send('OK');
-    // Асинхронно обрабатываем запрос
-    handleWebhook(req, res).catch(error => {
-      console.error('Ошибка при асинхронной обработке вебхука:', error);
-    });
-  };
-} else {
-  // Запуск в режиме long polling для локальной разработки
+// Для локальной разработки
+if (process.env.NODE_ENV !== 'production') {
   bot.start();
-  console.log('Бот запущен в режиме long polling!');
+  console.log('Бот запущен в режиме разработки!');
 } 
