@@ -195,6 +195,8 @@ bot.on('message:text', async (ctx: MyContext) => {
   // Skip if it's a command
   if (ctx.message?.text?.startsWith('/')) return;
   
+  console.log('Получено текстовое сообщение:', ctx.message?.text);
+  
   // Handle the message
   if (ctx.message?.text) {
     await handleAIRequest(ctx, ctx.message.text);
@@ -205,6 +207,8 @@ bot.on('message:text', async (ctx: MyContext) => {
 bot.on('message:photo', async (ctx: MyContext) => {
   // Skip if not allowed group
   if (!isAllowedGroup(ctx)) return;
+  
+  console.log('Получено фото сообщение');
   
   try {
     if (ctx.session.waitingForCompletion) {
@@ -424,23 +428,24 @@ async function callOpenRouterAPIWithImage(chatHistory: SessionData['chatHistory'
     // Prepare the context from chat history
     const messages = prepareMessages(chatHistory);
     
-    // Add the image to the last message if it exists
+    // Добавляем изображение к последнему сообщению пользователя
     if (messages.length > 0) {
       const lastMessage = messages[messages.length - 1];
       
-      // Преобразуем content в массив MessageContent если это строка
-      if (typeof lastMessage.content === 'string') {
-        lastMessage.content = [
-          { type: 'text', text: lastMessage.content },
+      // Создаем новое сообщение с изображением
+      const newMessage = {
+        role: 'user',
+        content: [
+          { type: 'text', text: query },
           { type: 'image_url', image_url: { url: imageUrl } }
-        ];
-      } 
-      // Если уже массив, добавляем изображение
-      else if (Array.isArray(lastMessage.content)) {
-        lastMessage.content.push({ 
-          type: 'image_url', 
-          image_url: { url: imageUrl } 
-        });
+        ]
+      };
+      
+      // Заменяем последнее сообщение или добавляем новое
+      if (lastMessage.role === 'user') {
+        messages[messages.length - 1] = newMessage;
+      } else {
+        messages.push(newMessage);
       }
     }
     
@@ -494,6 +499,27 @@ function prepareMessages(chatHistory: SessionData['chatHistory']) {
   return apiMessages;
 }
 
+// Обработчик вебхука для Vercel
+async function handleWebhook(req: any, res: any) {
+  try {
+    console.log('Обработка вебхука Telegram');
+    
+    // Проверяем, что запрос содержит обновление
+    if (!req.body) {
+      throw new Error('Отсутствует тело запроса');
+    }
+    
+    // Обрабатываем обновление
+    await bot.handleUpdate(req.body);
+    
+    // Отвечаем Telegram, что получили запрос
+    res.status(200).send('OK');
+  } catch (error) {
+    console.error('Ошибка при обработке вебхука:', error);
+    res.status(500).send(`Ошибка обработки: ${error.message}`);
+  }
+}
+
 // Запуск бота в разных режимах
 if (IS_VERCEL) {
   // Vercel mode: use webhooks
@@ -504,20 +530,11 @@ if (IS_VERCEL) {
   console.log(`Бот работает в режиме вебхуков на ${WEBHOOK_URL}`);
   
   // Экспорт для Vercel API endpoint
-  module.exports = async (req: any, res: any) => {
-    try {
-      if (req.method === 'POST') {
-        const update = req.body;
-        await bot.handleUpdate(update);
-        res.status(200).send('OK');
-      } else {
-        res.status(200).send(`Бот ${BOT_NAME} работает через вебхуки!`);
-      }
-    } catch (error) {
-      console.error('Ошибка в API роуте:', error);
-      res.status(500).send('Internal Server Error');
-    }
+  const webhookHandler = async (req: any, res: any) => {
+    await handleWebhook(req, res);
   };
+  
+  module.exports = webhookHandler;
 } else {
   // Local mode: use long polling
   bot.start({
