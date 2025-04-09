@@ -1,24 +1,51 @@
 // Импортируем скомпилированный файл бота
 const bot = require('../dist/index.js');
 
+// Хранилище для проверки дубликатов запросов
+const processedUpdateIds = new Set();
+
+// Функция для проверки дубликатов
+function isDuplicate(updateId) {
+  if (!updateId) return false;
+  if (processedUpdateIds.has(updateId)) return true;
+  
+  // Добавляем новый ID
+  processedUpdateIds.add(updateId);
+  
+  // Очищаем кеш если слишком большой
+  if (processedUpdateIds.size > 1000) {
+    const iter = processedUpdateIds.values();
+    processedUpdateIds.delete(iter.next().value);
+  }
+  
+  return false;
+}
+
 module.exports = async (req, res) => {
   try {
-    // Мгновенно отвечаем Telegram для предотвращения таймаутов и дублирования
+    // Всегда мгновенно отвечаем Telegram
     res.status(200).send('OK');
 
-    console.log('Webhook received:', {
-      method: req.method,
-      updateId: req.body?.update_id,
-      hasMessage: !!req.body?.message
-    });
-
-    if (req.method === 'POST' && req.body) {
-      // Асинхронно обрабатываем запрос без ожидания результата
-      bot(req, res).catch(error => {
-        console.error('Async webhook processing error:', error);
-      });
+    if (req.method !== 'POST' || !req.body) {
+      return; // Игнорируем все кроме POST с данными
     }
+    
+    const updateId = req.body.update_id;
+    
+    // Проверяем дубликаты запросов по ID
+    if (isDuplicate(updateId)) {
+      console.log(`Вебхук: игнорирую дублирующий запрос с ID ${updateId}`);
+      return;
+    }
+    
+    // Логируем минимум информации
+    console.log(`Вебхук получил запрос: ${updateId}, ${!!req.body.message ? 'сообщение' : 'другой тип'}`);
+    
+    // Асинхронно обрабатываем запрос
+    bot(req, res).catch(error => {
+      console.error('Ошибка обработки вебхука:', error.message);
+    });
   } catch (error) {
-    console.error('Webhook error:', error);
+    console.error('Критическая ошибка в вебхуке:', error);
   }
 }; 

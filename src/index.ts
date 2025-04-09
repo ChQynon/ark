@@ -35,6 +35,8 @@ interface SessionData {
   chatHistory: ApiMessage[];
   // Для предотвращения дублирования
   processedMessageIds: Set<number>;
+  lastMessageText?: string; 
+  lastMessageTime?: number;
   lastUpdateId?: number;
 }
 
@@ -64,11 +66,14 @@ const YOUR_SITE_NAME = process.env.YOUR_SITE_NAME || 'TelegramAIBot';
 
 // Глобальный кеш для предотвращения дублирования запросов
 const processedUpdates = new Set<number>();
+// Хранилище для последних обработанных текстовых сообщений
+const processedMessages = new Map<string, number>();
 
 // Дополнительные настройки для ускорения
 const API_TIMEOUT_TEXT = 20000; // 20 секунд для текстовых запросов
 const API_TIMEOUT_IMAGE = 30000; // 30 секунд для изображений
 const MAX_HISTORY_MESSAGES = 3; // Максимальное количество сообщений в истории
+const DUPLICATE_MESSAGE_TIMEOUT = 10000; // 10 секунд защита от дублей
 
 if (!TELEGRAM_BOT_TOKEN || !OPENROUTER_API_KEY) {
   console.error('Ошибка: TELEGRAM_BOT_TOKEN или OPENROUTER_API_KEY не указаны в файле .env');
@@ -87,42 +92,101 @@ bot.use(session({
   }),
 }));
 
+// Функция для проверки дубликатов текстовых сообщений
+function isDuplicateMessage(chatId: number, userId: number, text: string): boolean {
+  const now = Date.now();
+  const key = `${chatId}:${userId}:${text}`;
+  
+  // Проверяем, было ли такое сообщение недавно
+  const lastTime = processedMessages.get(key);
+  if (lastTime && now - lastTime < DUPLICATE_MESSAGE_TIMEOUT) {
+    return true;
+  }
+  
+  // Запоминаем это сообщение
+  processedMessages.set(key, now);
+  
+  // Очистка старых записей
+  if (processedMessages.size > 1000) {
+    const keysToDelete = [];
+    for (const [storedKey, timestamp] of processedMessages.entries()) {
+      if (now - timestamp > DUPLICATE_MESSAGE_TIMEOUT) {
+        keysToDelete.push(storedKey);
+      }
+      if (keysToDelete.length > 500) break;
+    }
+    
+    for (const key of keysToDelete) {
+      processedMessages.delete(key);
+    }
+  }
+  
+  return false;
+}
+
 // Middleware для предотвращения дублирования сообщений
 bot.use(async (ctx, next) => {
-  // Быстрая проверка дубликатов
-  if (ctx.update.update_id) {
-    if (processedUpdates.has(ctx.update.update_id)) {
-      console.log(`Пропуск дубликата обновления ID: ${ctx.update.update_id}`);
-      return;
+  try {
+    // Быстрая проверка дубликатов обновлений по ID
+    if (ctx.update.update_id) {
+      if (processedUpdates.has(ctx.update.update_id)) {
+        console.log(`Пропуск дубликата обновления ID: ${ctx.update.update_id}`);
+        return;
+      }
+      
+      processedUpdates.add(ctx.update.update_id);
+      
+      // Ограничиваем размер кеша
+      if (processedUpdates.size > 1000) {
+        const iter = processedUpdates.values();
+        processedUpdates.delete(iter.next().value);
+      }
     }
     
-    processedUpdates.add(ctx.update.update_id);
-    
-    // Ограничиваем размер кеша
-    if (processedUpdates.size > 1000) {
-      const iter = processedUpdates.values();
-      processedUpdates.delete(iter.next().value);
+    // Проверка дубликатов текстовых сообщений
+    if (ctx.message?.text && ctx.chat?.id && ctx.from?.id) {
+      // Дополнительная проверка на дубликаты текстовых сообщений
+      if (isDuplicateMessage(ctx.chat.id, ctx.from.id, ctx.message.text)) {
+        console.log(`Пропуск дубликата текстового сообщения: ${ctx.message.text.substring(0, 20)}...`);
+        return;
+      }
+      
+      // Проверка по контексту сессии
+      if (ctx.session.lastMessageText === ctx.message.text &&
+          ctx.session.lastMessageTime &&
+          Date.now() - ctx.session.lastMessageTime < DUPLICATE_MESSAGE_TIMEOUT) {
+        console.log(`Пропуск дубликата сообщения на уровне сессии: ${ctx.message.text.substring(0, 20)}...`);
+        return;
+      }
+      
+      // Запоминаем последнее сообщение
+      ctx.session.lastMessageText = ctx.message.text;
+      ctx.session.lastMessageTime = Date.now();
     }
+    
+    // Проверка по ID сообщения
+    if (ctx.message?.message_id) {
+      if (ctx.session.processedMessageIds.has(ctx.message.message_id)) {
+        console.log(`Пропуск дубликата сообщения ID: ${ctx.message.message_id}`);
+        return;
+      }
+      
+      ctx.session.processedMessageIds.add(ctx.message.message_id);
+      
+      // Ограничиваем размер кеша сессии
+      if (ctx.session.processedMessageIds.size > 100) {
+        const iter = ctx.session.processedMessageIds.values();
+        ctx.session.processedMessageIds.delete(iter.next().value);
+      }
+    }
+    
+    // Продолжаем обработку
+    await next();
+  } catch (error) {
+    console.error('Ошибка в middleware дедупликации:', error);
+    // Продолжаем обработку даже при ошибке проверки
+    await next();
   }
-  
-  // Проверка дубликатов сообщений
-  if (ctx.message?.message_id) {
-    if (ctx.session.processedMessageIds.has(ctx.message.message_id)) {
-      console.log(`Пропуск дубликата сообщения ID: ${ctx.message.message_id}`);
-      return;
-    }
-    
-    ctx.session.processedMessageIds.add(ctx.message.message_id);
-    
-    // Ограничиваем размер кеша
-    if (ctx.session.processedMessageIds.size > 100) {
-      const iter = ctx.session.processedMessageIds.values();
-      ctx.session.processedMessageIds.delete(iter.next().value);
-    }
-  }
-  
-  // Продолжаем обработку
-  await next();
 });
 
 // Check if message is from allowed group
@@ -159,25 +223,134 @@ bot.command("start", async (ctx: MyContext) => {
   }
 });
 
+// Обрабатываем команды и кнопки
+bot.command(["help", "about", "clear"], async (ctx: MyContext) => {
+  if (!isAllowedGroup(ctx)) return;
+  
+  try {
+    const command = ctx.message?.text?.split(' ')[0].substring(1);
+    
+    switch (command) {
+      case 'help':
+        const helpText = `📚 *Как пользоваться ботом ${BOT_NAME}*:
+
+1️⃣ *Прямые сообщения*: просто напишите мне ваш вопрос
+2️⃣ *Команда в чате*: используйте команду /ai + ваш вопрос
+3️⃣ *Отправка фото*: отправьте фото с описанием или вопросом
+4️⃣ *Кнопки*: используйте кнопки внизу для быстрого доступа
+5️⃣ *История чатов*: я запоминаю контекст разговора, но вы можете сбросить его нажав "🧹 Очистить историю"
+
+Создано компанией ${BOT_CREATOR} на базе ${BOT_PLATFORM}.`;
+        await ctx.reply(helpText, {
+          parse_mode: "Markdown",
+          reply_markup: getMainKeyboard(),
+        });
+        break;
+        
+      case 'about':
+        await ctx.reply(`ℹ️ *О боте*\n\nЯ ${BOT_NAME}, передовой ИИ-ассистент, разработанный на базе ${BOT_PLATFORM}.\nСоздан компанией ${BOT_CREATOR}.\n\nВерсия: 1.0.0`, {
+          parse_mode: "Markdown",
+          reply_markup: getMainKeyboard(),
+        });
+        break;
+        
+      case 'clear':
+        ctx.session.chatHistory = [];
+        await ctx.reply("🧹 История очищена! Начинаем разговор заново.", {
+          reply_markup: getMainKeyboard(),
+        });
+        break;
+    }
+  } catch (error) {
+    console.error(`Ошибка в обработке команды:`, error);
+  }
+});
+
+// Обрабатываем кнопки меню
+bot.hears(["❓ Задать вопрос", "📸 Анализ изображения", "ℹ️ О боте", "📚 Помощь", "🧹 Очистить историю"], async (ctx) => {
+  if (!isAllowedGroup(ctx)) return;
+  
+  try {
+    const text = ctx.message?.text;
+    
+    switch (text) {
+      case "❓ Задать вопрос":
+        await ctx.reply("Пожалуйста, введите ваш вопрос:", {
+          reply_markup: { remove_keyboard: true },
+        });
+        break;
+        
+      case "📸 Анализ изображения":
+        await ctx.reply("Пожалуйста, отправьте изображение для анализа:", {
+          reply_markup: { remove_keyboard: true },
+        });
+        break;
+        
+      case "ℹ️ О боте":
+        await ctx.reply(`ℹ️ *О боте*\n\nЯ ${BOT_NAME}, передовой ИИ-ассистент, разработанный на базе ${BOT_PLATFORM}.\nСоздан компанией ${BOT_CREATOR}.\n\nВерсия: 1.0.0`, {
+          parse_mode: "Markdown",
+          reply_markup: getMainKeyboard(),
+        });
+        break;
+        
+      case "📚 Помощь":
+        const helpText = `📚 *Как пользоваться ботом ${BOT_NAME}*:
+
+1️⃣ *Прямые сообщения*: просто напишите мне ваш вопрос
+2️⃣ *Команда в чате*: используйте команду /ai + ваш вопрос
+3️⃣ *Отправка фото*: отправьте фото с описанием или вопросом
+4️⃣ *Кнопки*: используйте кнопки внизу для быстрого доступа
+5️⃣ *История чатов*: я запоминаю контекст разговора, но вы можете сбросить его нажав "🧹 Очистить историю"
+
+Создано компанией ${BOT_CREATOR} на базе ${BOT_PLATFORM}.`;
+        await ctx.reply(helpText, {
+          parse_mode: "Markdown",
+          reply_markup: getMainKeyboard(),
+        });
+        break;
+        
+      case "🧹 Очистить историю":
+        ctx.session.chatHistory = [];
+        await ctx.reply("🧹 История очищена! Начинаем разговор заново.", {
+          reply_markup: getMainKeyboard(),
+        });
+        break;
+    }
+  } catch (error) {
+    console.error(`Ошибка в обработке кнопки:`, error);
+  }
+});
+
 // Handle text messages
 bot.on('message:text', async (ctx: MyContext) => {
   try {
     // Skip if not allowed group or is a command
-    if (!isAllowedGroup(ctx) || (ctx.message?.text?.startsWith('/') && ctx.message.text !== '/start')) return;
+    if (!isAllowedGroup(ctx)) return;
+    if (ctx.message?.text?.startsWith('/') && ctx.message.text !== '/start') return;
+    
+    // Пропускаем сообщения, которые содержат только команды или кнопки
+    const text = ctx.message?.text;
+    if (!text || text.startsWith('/')) return;
+    
+    // Проверяем, не обрабатывается ли уже это сообщение через другой обработчик
+    if (text === "❓ Задать вопрос" || 
+        text === "📸 Анализ изображения" || 
+        text === "ℹ️ О боте" || 
+        text === "📚 Помощь" || 
+        text === "🧹 Очистить историю") {
+      return;
+    }
     
     // Логируем получение сообщения
-    console.log(`Получено сообщение: ${ctx.message?.text?.substring(0, 30)}...`);
+    console.log(`Получено текстовое сообщение: ${text.substring(0, 30)}...`);
     
     // Моментально отвечаем пользователю чтобы он видел, что бот получил сообщение
     const statusMsg = await ctx.reply("⏳ Обрабатываю...");
     
-    // Обрабатываем запрос асинхронно
-    if (ctx.message?.text && !ctx.message.text.startsWith('/')) {
-      // Запускаем асинхронную обработку без ожидания
-      processAIRequest(ctx, ctx.message.text, statusMsg.message_id).catch(error => {
-        console.error('Ошибка при обработке текстового сообщения:', error);
-      });
-    }
+    // Запускаем асинхронную обработку без ожидания
+    processAIRequest(ctx, text, statusMsg.message_id).catch(error => {
+      console.error('Ошибка при обработке текстового сообщения:', error);
+    });
   } catch (error) {
     console.error('Ошибка при получении текстового сообщения:', error);
   }
@@ -524,7 +697,7 @@ async function handleWebhook(req: any, res: any) {
     // Мгновенно отвечаем, что получили запрос
     res.status(200).send('OK');
     
-    // Проверяем дублирование запроса
+    // Проверяем дублирование запроса по update_id
     if (req.body?.update_id && processedUpdates.has(req.body.update_id)) {
       console.log(`Вебхук: пропуск дубликата обновления ID: ${req.body.update_id}`);
       return;
@@ -539,6 +712,19 @@ async function handleWebhook(req: any, res: any) {
     if (!req.body) {
       console.error('Отсутствует тело запроса');
       return;
+    }
+    
+    // Дополнительная проверка для текстовых сообщений
+    if (req.body.message?.text && req.body.message?.from?.id && req.body.message?.chat?.id) {
+      const chatId = req.body.message.chat.id;
+      const userId = req.body.message.from.id;
+      const text = req.body.message.text;
+      
+      // Проверяем по глобальному хранилищу
+      if (isDuplicateMessage(chatId, userId, text)) {
+        console.log(`Вебхук: пропуск дубликата текстового сообщения: ${text.substring(0, 20)}...`);
+        return;
+      }
     }
     
     // Обрабатываем обновление асинхронно без ожидания
@@ -583,6 +769,23 @@ setInterval(() => {
     processedUpdates.clear();
     toKeep.forEach(id => processedUpdates.add(id));
   }
+  
+  // Очистка кеша текстовых сообщений
+  const now = Date.now();
+  const keysToDelete = [];
+  for (const [key, timestamp] of processedMessages.entries()) {
+    if (now - timestamp > DUPLICATE_MESSAGE_TIMEOUT) {
+      keysToDelete.push(key);
+    }
+  }
+  
+  if (keysToDelete.length > 0) {
+    console.log(`Очистка кеша текстовых сообщений: удаляем ${keysToDelete.length} устаревших записей`);
+    for (const key of keysToDelete) {
+      processedMessages.delete(key);
+    }
+  }
+  
 }, 60000); // Очищаем каждую минуту
 
 // Error handling
