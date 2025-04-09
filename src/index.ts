@@ -16,36 +16,24 @@ if (!TELEGRAM_BOT_TOKEN || !OPENROUTER_API_KEY) {
 // Инициализация бота
 const bot = new Bot(TELEGRAM_BOT_TOKEN);
 
-// Просто логирование для отладки
-bot.use(async (ctx, next) => {
-  console.log('Получен запрос:', ctx.update.update_id, JSON.stringify(ctx.message?.text).substring(0, 30));
-  await next();
-  console.log('Запрос обработан:', ctx.update.update_id);
-});
-
-// Обработка команды /start
+// ВАЖНО: Сначала регистрируем команды, потом общие обработчики
 bot.command("start", async (ctx) => {
+  console.log('🟢 СТАРТ КОМАНДА - Обработка...');
   await ctx.reply(`👋 Привет! Я ARK-1, ИИ-ассистент. Отправь мне сообщение или фото.`);
-  console.log('Команда start обработана');
+  console.log('✅ СТАРТ КОМАНДА - Отправлен ответ');
 });
 
-// Обработка ВСЕХ текстовых сообщений
-bot.on('message:text', async (ctx) => {
-  const text = ctx.message.text || '';
-  
-  // Пропускаем ТОЛЬКО команды, на ВСЁ остальное отвечаем
-  if (text.startsWith('/')) {
-    console.log('Пропуск команды:', text);
-    return;
-  }
-  
-  console.log('Обработка текста:', text.substring(0, 30));
+// Функция для отправки текстовой подсказки пользователю
+async function respondToText(ctx, text) {
+  console.log('🟢 ТЕКСТ - Обработка:', text.substring(0, 30));
   
   try {
-    // Мгновенно начинаем печатать
-    await ctx.api.sendChatAction(ctx.chat.id, "typing");
+    // Сразу показываем набор текста
+    await ctx.api.sendChatAction(ctx.chat.id, "typing").catch(e => 
+      console.error("Ошибка отправки 'печатает':", e.message)
+    );
     
-    // Быстрый запрос к API
+    // Прямой запрос к API
     const response = await axios.post(
       'https://openrouter.ai/api/v1/chat/completions',
       {
@@ -55,121 +43,135 @@ bot.on('message:text', async (ctx) => {
             role: 'system',
             content: 'Ты ARK-1, ИИ-ассистент. Отвечай коротко и только по делу, без лишних слов. Пиши только на русском языке.'
           },
-          {
-            role: 'user',
-            content: text
-          }
+          { role: 'user', content: text }
         ],
-        max_tokens: 500
+        max_tokens: 400,
+        temperature: 0.7
       },
       {
         headers: {
           'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
           'Content-Type': 'application/json',
         },
-        timeout: 10000 // Еще меньше таймаут - 10 секунд
+        timeout: 8000 // Ещё быстрее - 8 секунд
       }
     );
     
-    // Мгновенно отвечаем пользователю
-    const responseText = response.data.choices[0].message.content || 'Нет ответа';
+    // Формируем и отправляем ответ
+    const responseText = response.data?.choices[0]?.message?.content || 'Нет ответа';
     await ctx.reply(responseText);
-    console.log('Отправлен ответ:', responseText.substring(0, 30));
+    console.log('✅ ТЕКСТ - Отправлен ответ:', responseText.substring(0, 30));
+    return true;
     
   } catch (error) {
-    console.error('Ошибка при обработке текста:', error.message);
-    await ctx.reply('Ошибка при обработке запроса. Пожалуйста, попробуйте еще раз.');
-  }
-});
-
-// Обработка фото
-bot.on('message:photo', async (ctx) => {
-  console.log('Обработка фото');
-  try {
-    // Показываем что печатаем
-    await ctx.api.sendChatAction(ctx.chat.id, "typing");
-    
-    // Получаем фото
-    const photoInfo = ctx.message.photo;
-    const fileId = photoInfo[photoInfo.length - 1].file_id;
-    const fileInfo = await ctx.api.getFile(fileId);
-    
-    if (!fileInfo.file_path) {
-      throw new Error("Не удалось получить файл");
-    }
-    
-    // Формируем URL фото
-    const photoUrl = `https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${fileInfo.file_path}`;
-    
-    // Получаем подпись или стандартный текст
-    const caption = ctx.message.caption || "Опиши, что на этом изображении";
-    
-    // Быстрый запрос с изображением
-    const response = await axios.post(
-      'https://openrouter.ai/api/v1/chat/completions',
-      {
-        model: 'meta-llama/llama-4-maverick:free',
-        messages: [
-          {
-            role: 'system',
-            content: 'Ты ARK-1, ИИ-ассистент. Отвечай кратко по делу и только на русском языке.'
-          },
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: caption },
-              { type: 'image_url', image_url: { url: photoUrl } }
-            ]
-          }
-        ],
-        max_tokens: 800
-      },
-      {
-        headers: {
-          'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        timeout: 15000 // Еще быстрее - 15 секунд
-      }
+    console.error('❌ ТЕКСТ - Ошибка обработки:', error.message);
+    await ctx.reply('Ошибка обработки. Попробуйте написать что-то другое.').catch(e => 
+      console.error("Ошибка отправки ошибки:", e.message)
     );
-    
-    // Отвечаем пользователю
-    const responseText = response.data.choices[0].message.content || 'Нет ответа';
-    await ctx.reply(responseText);
-    console.log('Отправлен ответ на фото');
-    
-  } catch (error) {
-    console.error('Ошибка при обработке изображения:', error.message);
-    await ctx.reply('Ошибка при обработке изображения. Попробуйте другое фото.');
+    return false;
   }
-});
+}
 
-// Обработка всех остальных сообщений
+// ОБРАБОТКА ВСЕХ ТИПОВ СООБЩЕНИЙ
 bot.on('message', async (ctx) => {
-  console.log('Получено сообщение другого типа');
-  await ctx.reply('Отправьте мне текст или изображение.');
-});
-
-// Хендлер любых ошибок бота
-bot.catch((err) => {
-  console.error('Ошибка бота:', err);
-});
-
-// Обработка вебхуков от Telegram
-module.exports = async (req, res) => {
-  // Сразу отвечаем OK для избежания таймаутов
-  res.status(200).send('OK');
+  // 1. Сначала проверяем, команда ли это
+  if (ctx.message.text && ctx.message.text.startsWith('/')) {
+    console.log('⏩ Пропуск команды:', ctx.message.text);
+    return;
+  }
   
-  // Обрабатываем запрос асинхронно
-  try {
-    if (req.body) {
-      console.log('Получен вебхук:', req.body.update_id);
-      await bot.handleUpdate(req.body);
-    } else {
-      console.error('Пустой запрос без тела');
+  // 2. Проверяем текстовое сообщение
+  if (ctx.message.text) {
+    await respondToText(ctx, ctx.message.text);
+    return;
+  }
+  
+  // 3. Если это фото
+  if (ctx.message.photo) {
+    console.log('🟢 ФОТО - Обработка...');
+    try {
+      await ctx.api.sendChatAction(ctx.chat.id, "typing");
+      
+      const photoInfo = ctx.message.photo;
+      const fileId = photoInfo[photoInfo.length - 1].file_id;
+      const fileInfo = await ctx.api.getFile(fileId);
+      
+      if (!fileInfo.file_path) {
+        throw new Error("Не удалось получить файл");
+      }
+      
+      // Формируем URL фото
+      const photoUrl = `https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${fileInfo.file_path}`;
+      const caption = ctx.message.caption || "Опиши что на этом изображении";
+      
+      const response = await axios.post(
+        'https://openrouter.ai/api/v1/chat/completions',
+        {
+          model: 'meta-llama/llama-4-maverick:free',
+          messages: [
+            {
+              role: 'system',
+              content: 'Ты ARK-1, ИИ-ассистент. Отвечай кратко по делу и только на русском языке.'
+            },
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: caption },
+                { type: 'image_url', image_url: { url: photoUrl } }
+              ]
+            }
+          ],
+          max_tokens: 600
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: 12000
+        }
+      );
+      
+      const responseText = response.data?.choices[0]?.message?.content || 'Нет ответа';
+      await ctx.reply(responseText);
+      console.log('✅ ФОТО - Отправлен ответ');
+      
+    } catch (error) {
+      console.error('❌ ФОТО - Ошибка:', error.message);
+      await ctx.reply('Ошибка при обработке фото. Попробуйте другое изображение.');
     }
+    return;
+  }
+  
+  // 4. Любой другой тип сообщения
+  console.log('🟢 ДРУГОЕ - Получено сообщение другого типа');
+  await ctx.reply('Отправьте мне текст или изображение для анализа.').catch(e => 
+    console.error("Ошибка отправки:", e.message)
+  );
+});
+
+// ОБРАБОТКА ЗАПРОСОВ ОТ TELEGRAM
+module.exports = async (req, res) => {
+  // Сразу отвечаем OK
+  if (!res.headersSent) {
+    res.status(200).send('OK');
+  }
+  
+  try {
+    // Проверяем наличие тела запроса
+    if (!req.body) {
+      console.error('⚠️ ВЕБХУК - Пустой запрос без тела');
+      return;
+    }
+    
+    console.log(`🔵 ВЕБХУК - ID: ${req.body.update_id}, Тип: ${req.body.message ? (req.body.message.text ? 'Текст' : 'Другое') : 'Неизвестно'}`);
+    
+    // Передаем запрос боту
+    await bot.handleUpdate(req.body);
+    console.log(`✅ ВЕБХУК - Обработан запрос: ${req.body.update_id}`);
+    
   } catch (error) {
-    console.error('Ошибка вебхука:', error.message);
+    console.error(`❌ ВЕБХУК - Ошибка: ${error.message}`);
   }
 };
 
