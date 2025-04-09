@@ -100,11 +100,17 @@ function getMainKeyboard(): Keyboard {
 
 // Handle start command
 bot.command("start", async (ctx: MyContext) => {
-  if (!isAllowedGroup(ctx)) return;
+  console.log('Получена команда /start от пользователя:', ctx.from?.id, ctx.from?.username);
   
-  await ctx.reply(BOT_INTRO, {
-    reply_markup: getMainKeyboard(),
-  });
+  try {
+    // Отправляем простой ответ без использования OpenRouter API
+    await ctx.reply("👋 Привет! Я получил твою команду /start. Я ARK-1, бот на базе PLEXY.", {
+      reply_markup: getMainKeyboard(),
+    });
+    console.log('Ответ на команду /start отправлен успешно');
+  } catch (error) {
+    console.error('Ошибка при ответе на /start:', error);
+  }
 });
 
 // Handle help command
@@ -637,4 +643,21 @@ process.on('uncaughtException', (error: Error) => {
 
 process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
   console.error('Необработанное отклонение:', promise, 'причина:', reason);
+});
+
+// Добавим простой обработчик для прямого тестирования без API
+bot.on('message', async (ctx: MyContext) => {
+  console.log('Получено сообщение (универсальный обработчик)');
+  
+  // Проверяем, что это не текстовое сообщение и не фото
+  if (ctx.message && !('text' in ctx.message) && !('photo' in ctx.message)) {
+    console.log('Получен другой тип сообщения:', ctx.message);
+    
+    try {
+      await ctx.reply('Я получил ваше сообщение и выполняю простой ответ без OpenRouter API.');
+      console.log('Простой ответ отправлен успешно');
+    } catch (error) {
+      console.error('Ошибка при отправке простого ответа:', error);
+    }
+  }
 }); 
