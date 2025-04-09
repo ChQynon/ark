@@ -61,7 +61,10 @@ bot.use(session({
 
 // Check if message is from allowed group
 function isAllowedGroup(ctx: MyContext): boolean {
-  return ctx.chat?.type === "private" || ctx.chat?.id === ALLOWED_GROUP_ID;
+  // Разрешаем все чаты, чтобы убедиться, что бот работает
+  return true;
+  // Раскомментировать строку ниже, если нужно вернуть ограничение по группам
+  // return ctx.chat?.type === "private" || ctx.chat?.id === ALLOWED_GROUP_ID;
 }
 
 // Add message to chat history
@@ -191,18 +194,28 @@ bot.hears("🧹 Очистить историю", async (ctx: MyContext) => {
 
 // Handle direct messages (excluding commands)
 bot.on('message:text', async (ctx: MyContext) => {
+  console.log('Получено текстовое сообщение:', ctx.message?.text?.substring(0, 50));
+  
   // Skip if not allowed group
-  if (!isAllowedGroup(ctx)) return;
+  if (!isAllowedGroup(ctx)) {
+    console.log('Сообщение отклонено - чат не разрешен:', ctx.chat?.id);
+    return;
+  }
   
   // Skip if it's a command
-  if (ctx.message?.text?.startsWith('/')) return;
+  if (ctx.message?.text?.startsWith('/')) {
+    console.log('Сообщение отклонено - это команда');
+    return;
+  }
   
   // Add user message to history
   if (ctx.message?.text) {
+    console.log('Добавляем сообщение в историю');
     addToHistory(ctx, 'user', ctx.message.text);
   }
   
   // Handle the message
+  console.log('Обрабатываем сообщение через handleAIRequest');
   await handleAIRequest(ctx, ctx.message?.text || "");
 });
 
@@ -346,12 +359,16 @@ bot.command('ai', async (ctx: MyContext) => {
 
 // Handler for AI requests
 async function handleAIRequest(ctx: MyContext, query: string) {
+  console.log('handleAIRequest начал работу, запрос:', query.substring(0, 50));
+  
   if (ctx.session.waitingForCompletion) {
+    console.log('Ждем завершения предыдущего запроса');
     await ctx.reply("Я все еще обрабатываю ваш предыдущий запрос. Пожалуйста, подождите.");
     return;
   }
   
   if (!query.trim()) {
+    console.log('Запрос пустой');
     await ctx.reply("Пожалуйста, введите текст запроса.");
     return;
   }
@@ -359,27 +376,35 @@ async function handleAIRequest(ctx: MyContext, query: string) {
   try {
     // Set waiting status
     ctx.session.waitingForCompletion = true;
+    console.log('Статус ожидания установлен');
     
     // Send typing indicator
     if (ctx.chat) {
+      console.log('Отправляем индикатор набора текста');
       await ctx.api.sendChatAction(ctx.chat.id, "typing");
     }
     
     // Notify user that we're processing
+    console.log('Отправляем сообщение о начале обработки');
     const statusMsg = await ctx.reply("Обрабатываю ваш запрос...");
     
     // Call OpenRouter API
+    console.log('Вызываем OpenRouter API');
     const response = await callOpenRouterAPI(ctx, query);
+    console.log('Ответ получен от OpenRouter API:', response.substring(0, 50));
     
     // Add bot response to history
+    console.log('Добавляем ответ в историю');
     addToHistory(ctx, 'assistant', response);
     
     // Delete the status message
     if (ctx.chat) {
+      console.log('Удаляем сообщение о начале обработки');
       await ctx.api.deleteMessage(ctx.chat.id, statusMsg.message_id);
     }
     
     // Send the AI response
+    console.log('Отправляем ответ пользователю');
     await ctx.reply(response, {
       parse_mode: 'Markdown',
       disable_web_page_preview: true,
@@ -390,6 +415,7 @@ async function handleAIRequest(ctx: MyContext, query: string) {
     await ctx.reply('Извините, произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте еще раз позже.');
   } finally {
     // Reset waiting status
+    console.log('Сбрасываем статус ожидания');
     ctx.session.waitingForCompletion = false;
   }
 }
