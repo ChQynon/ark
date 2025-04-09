@@ -5,22 +5,34 @@ import axios from 'axios';
 
 dotenv.config();
 
-// Описание контента для OpenRouter API
-interface MessageContent {
-  type: string;
-  text?: string;
-  image_url?: {
+// Типы сообщений для OpenRouter API
+type Role = 'user' | 'assistant' | 'system';
+
+// Контент сообщения
+interface TextContent {
+  type: 'text';
+  text: string;
+}
+
+interface ImageContent {
+  type: 'image_url';
+  image_url: {
     url: string;
   };
+}
+
+type MessageContent = TextContent | ImageContent;
+
+// Сообщение для API
+interface ApiMessage {
+  role: Role;
+  content: string | MessageContent[];
 }
 
 // Расширенная сессия с историей чатов
 interface SessionData {
   waitingForCompletion: boolean;
-  chatHistory: {
-    role: 'user' | 'assistant' | 'system';
-    content: string | MessageContent[];
-  }[];
+  chatHistory: ApiMessage[];
 }
 
 // Расширенный контекст для бота
@@ -85,19 +97,24 @@ function getMainKeyboard(): Keyboard {
 bot.command("start", async (ctx: MyContext) => {
   if (!isAllowedGroup(ctx)) return;
   
-  // Reset history on start
-  ctx.session.chatHistory = [];
-  
-  await ctx.reply(BOT_INTRO, {
-    reply_markup: getMainKeyboard(),
-  });
+  try {
+    // Reset history on start
+    ctx.session.chatHistory = [];
+    
+    await ctx.reply(BOT_INTRO, {
+      reply_markup: getMainKeyboard(),
+    });
+  } catch (error) {
+    console.error('Ошибка в команде start:', error);
+  }
 });
 
 // Handle help command
 bot.command("help", async (ctx: MyContext) => {
   if (!isAllowedGroup(ctx)) return;
   
-  const helpText = `📚 *Как пользоваться ботом ${BOT_NAME}*:
+  try {
+    const helpText = `📚 *Как пользоваться ботом ${BOT_NAME}*:
 
 1️⃣ *Прямые сообщения*: просто напишите мне ваш вопрос
 2️⃣ *Команда в чате*: используйте команду /ai + ваш вопрос
@@ -107,71 +124,99 @@ bot.command("help", async (ctx: MyContext) => {
 
 Создано компанией ${BOT_CREATOR} на базе ${BOT_PLATFORM}.`;
 
-  await ctx.reply(helpText, {
-    parse_mode: "Markdown",
-    reply_markup: getMainKeyboard(),
-  });
+    await ctx.reply(helpText, {
+      parse_mode: "Markdown",
+      reply_markup: getMainKeyboard(),
+    });
+  } catch (error) {
+    console.error('Ошибка в команде help:', error);
+  }
 });
 
 // Handle about command
 bot.command("about", async (ctx: MyContext) => {
   if (!isAllowedGroup(ctx)) return;
   
-  await ctx.reply(`ℹ️ *О боте*\n\nЯ ${BOT_NAME}, передовой ИИ-ассистент, разработанный на базе ${BOT_PLATFORM}.\nСоздан компанией ${BOT_CREATOR}.\n\nВерсия: 1.0.0`, {
-    parse_mode: "Markdown",
-    reply_markup: getMainKeyboard(),
-  });
+  try {
+    await ctx.reply(`ℹ️ *О боте*\n\nЯ ${BOT_NAME}, передовой ИИ-ассистент, разработанный на базе ${BOT_PLATFORM}.\nСоздан компанией ${BOT_CREATOR}.\n\nВерсия: 1.0.0`, {
+      parse_mode: "Markdown",
+      reply_markup: getMainKeyboard(),
+    });
+  } catch (error) {
+    console.error('Ошибка в команде about:', error);
+  }
 });
 
 // Clear history command and button
 bot.command("clear", async (ctx: MyContext) => {
   if (!isAllowedGroup(ctx)) return;
   
-  ctx.session.chatHistory = [];
-  await ctx.reply("🧹 История очищена! Начинаем разговор заново.", {
-    reply_markup: getMainKeyboard(),
-  });
+  try {
+    ctx.session.chatHistory = [];
+    await ctx.reply("🧹 История очищена! Начинаем разговор заново.", {
+      reply_markup: getMainKeyboard(),
+    });
+  } catch (error) {
+    console.error('Ошибка в команде clear:', error);
+  }
 });
 
 bot.hears("🧹 Очистить историю", async (ctx: MyContext) => {
   if (!isAllowedGroup(ctx)) return;
   
-  ctx.session.chatHistory = [];
-  await ctx.reply("🧹 История очищена! Начинаем разговор заново.", {
-    reply_markup: getMainKeyboard(),
-  });
+  try {
+    ctx.session.chatHistory = [];
+    await ctx.reply("🧹 История очищена! Начинаем разговор заново.", {
+      reply_markup: getMainKeyboard(),
+    });
+  } catch (error) {
+    console.error('Ошибка при очистке истории:', error);
+  }
 });
 
 // Handle keyboard button presses
 bot.hears("❓ Задать вопрос", async (ctx: MyContext) => {
   if (!isAllowedGroup(ctx)) return;
   
-  await ctx.reply("Пожалуйста, введите ваш вопрос:", {
-    reply_markup: { remove_keyboard: true },
-  });
+  try {
+    await ctx.reply("Пожалуйста, введите ваш вопрос:", {
+      reply_markup: { remove_keyboard: true },
+    });
+  } catch (error) {
+    console.error('Ошибка при обработке кнопки "Задать вопрос":', error);
+  }
 });
 
 bot.hears("📸 Анализ изображения", async (ctx: MyContext) => {
   if (!isAllowedGroup(ctx)) return;
   
-  await ctx.reply("Пожалуйста, отправьте изображение для анализа:", {
-    reply_markup: { remove_keyboard: true },
-  });
+  try {
+    await ctx.reply("Пожалуйста, отправьте изображение для анализа:", {
+      reply_markup: { remove_keyboard: true },
+    });
+  } catch (error) {
+    console.error('Ошибка при обработке кнопки "Анализ изображения":', error);
+  }
 });
 
 bot.hears("ℹ️ О боте", async (ctx: MyContext) => {
   if (!isAllowedGroup(ctx)) return;
   
-  await ctx.reply(`ℹ️ *О боте*\n\nЯ ${BOT_NAME}, передовой ИИ-ассистент, разработанный на базе ${BOT_PLATFORM}.\nСоздан компанией ${BOT_CREATOR}.\n\nВерсия: 1.0.0`, {
-    parse_mode: "Markdown",
-    reply_markup: getMainKeyboard(),
-  });
+  try {
+    await ctx.reply(`ℹ️ *О боте*\n\nЯ ${BOT_NAME}, передовой ИИ-ассистент, разработанный на базе ${BOT_PLATFORM}.\nСоздан компанией ${BOT_CREATOR}.\n\nВерсия: 1.0.0`, {
+      parse_mode: "Markdown",
+      reply_markup: getMainKeyboard(),
+    });
+  } catch (error) {
+    console.error('Ошибка при обработке кнопки "О боте":', error);
+  }
 });
 
 bot.hears("📚 Помощь", async (ctx: MyContext) => {
   if (!isAllowedGroup(ctx)) return;
   
-  const helpText = `📚 *Как пользоваться ботом ${BOT_NAME}*:
+  try {
+    const helpText = `📚 *Как пользоваться ботом ${BOT_NAME}*:
 
 1️⃣ *Прямые сообщения*: просто напишите мне ваш вопрос
 2️⃣ *Команда в чате*: используйте команду /ai + ваш вопрос
@@ -181,36 +226,44 @@ bot.hears("📚 Помощь", async (ctx: MyContext) => {
 
 Создано компанией ${BOT_CREATOR} на базе ${BOT_PLATFORM}.`;
 
-  await ctx.reply(helpText, {
-    parse_mode: "Markdown",
-    reply_markup: getMainKeyboard(),
-  });
+    await ctx.reply(helpText, {
+      parse_mode: "Markdown",
+      reply_markup: getMainKeyboard(),
+    });
+  } catch (error) {
+    console.error('Ошибка при обработке кнопки "Помощь":', error);
+  }
 });
 
 // Handle direct messages (excluding commands)
 bot.on('message:text', async (ctx: MyContext) => {
-  // Skip if not allowed group
-  if (!isAllowedGroup(ctx)) return;
-  
-  // Skip if it's a command
-  if (ctx.message?.text?.startsWith('/')) return;
-  
-  console.log('Получено текстовое сообщение:', ctx.message?.text);
-  
-  // Handle the message
-  if (ctx.message?.text) {
-    await handleAIRequest(ctx, ctx.message.text);
+  try {
+    // Skip if not allowed group
+    if (!isAllowedGroup(ctx)) return;
+    
+    // Skip if it's a command
+    if (ctx.message?.text?.startsWith('/')) return;
+    
+    console.log('Получено текстовое сообщение:', ctx.message?.text);
+    
+    // Handle the message
+    if (ctx.message?.text) {
+      await handleAIRequest(ctx, ctx.message.text);
+    }
+  } catch (error) {
+    console.error('Ошибка при обработке текстового сообщения:', error);
+    await ctx.reply('Произошла ошибка при обработке сообщения. Пожалуйста, попробуйте еще раз.');
   }
 });
 
 // Handle photo messages
 bot.on('message:photo', async (ctx: MyContext) => {
-  // Skip if not allowed group
-  if (!isAllowedGroup(ctx)) return;
-  
-  console.log('Получено фото сообщение');
-  
   try {
+    // Skip if not allowed group
+    if (!isAllowedGroup(ctx)) return;
+    
+    console.log('Получено фото сообщение');
+    
     if (ctx.session.waitingForCompletion) {
       await ctx.reply("Я все еще обрабатываю ваш предыдущий запрос. Пожалуйста, подождите.");
       return;
@@ -234,6 +287,10 @@ bot.on('message:photo', async (ctx: MyContext) => {
     
     // Get file path
     const fileInfo = await ctx.api.getFile(fileId);
+    if (!fileInfo.file_path) {
+      throw new Error("Не удалось получить путь к файлу изображения");
+    }
+    
     const filePath = fileInfo.file_path;
     
     // Form full photo URL
@@ -261,8 +318,12 @@ bot.on('message:photo', async (ctx: MyContext) => {
     });
     
     // Delete the status message
-    if (ctx.chat) {
-      await ctx.api.deleteMessage(ctx.chat.id, statusMsg.message_id);
+    if (ctx.chat && statusMsg) {
+      try {
+        await ctx.api.deleteMessage(ctx.chat.id, statusMsg.message_id);
+      } catch (error) {
+        console.error('Не удалось удалить статусное сообщение:', error);
+      }
     }
     
     // Build inline keyboard for more actions
@@ -282,72 +343,91 @@ bot.on('message:photo', async (ctx: MyContext) => {
     // Reset waiting status
     ctx.session.waitingForCompletion = false;
     
-    // Always show main keyboard after processing
-    await ctx.reply("Что бы вы хотели сделать дальше?", {
-      reply_markup: getMainKeyboard(),
-    });
+    try {
+      // Always show main keyboard after processing
+      await ctx.reply("Что бы вы хотели сделать дальше?", {
+        reply_markup: getMainKeyboard(),
+      });
+    } catch (error) {
+      console.error('Ошибка при отправке финального сообщения:', error);
+    }
   }
 });
 
 // Handle inline keyboard callbacks
 bot.callbackQuery("more_details", async (ctx: MyContext) => {
-  if (!isAllowedGroup(ctx)) return;
-  
-  if (ctx.callbackQuery && 'message' in ctx.callbackQuery) {
-    await ctx.answerCallbackQuery("Получение дополнительной информации...");
-    await ctx.reply("Запрашиваю дополнительную информацию...");
+  try {
+    if (!isAllowedGroup(ctx)) return;
     
-    // Get the message that was replied to (which contains the image)
-    const messageWithImage = ctx.callbackQuery.message?.reply_to_message;
-    if (messageWithImage && 'photo' in messageWithImage) {
-      // Process with a different prompt for more details
-      await handleAIRequest(ctx, "Предоставь более подробный анализ изображения, включая мельчайшие детали и контекст");
-    } else {
-      await ctx.reply("Не могу найти оригинальное изображение для анализа.");
+    if (ctx.callbackQuery && 'message' in ctx.callbackQuery) {
+      await ctx.answerCallbackQuery("Получение дополнительной информации...");
+      await ctx.reply("Запрашиваю дополнительную информацию...");
+      
+      // Get the message that was replied to (which contains the image)
+      const messageWithImage = ctx.callbackQuery.message?.reply_to_message;
+      if (messageWithImage && 'photo' in messageWithImage) {
+        // Process with a different prompt for more details
+        await handleAIRequest(ctx, "Предоставь более подробный анализ изображения, включая мельчайшие детали и контекст");
+      } else {
+        await ctx.reply("Не могу найти оригинальное изображение для анализа.");
+      }
     }
+  } catch (error) {
+    console.error('Ошибка при обработке кнопки "Подробнее":', error);
+    await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте еще раз.');
   }
 });
 
 bot.callbackQuery("translate", async (ctx: MyContext) => {
-  if (!isAllowedGroup(ctx)) return;
-  
-  if (ctx.callbackQuery && 'message' in ctx.callbackQuery) {
-    await ctx.answerCallbackQuery("Перевод контента...");
-    await ctx.reply("Перевожу содержимое изображения на русский язык...");
+  try {
+    if (!isAllowedGroup(ctx)) return;
     
-    const messageWithImage = ctx.callbackQuery.message?.reply_to_message;
-    if (messageWithImage && 'photo' in messageWithImage) {
-      // Process with translation prompt
-      await handleAIRequest(ctx, "Переведи весь текст на этом изображении на русский язык");
-    } else {
-      await ctx.reply("Не могу найти оригинальное изображение для перевода.");
+    if (ctx.callbackQuery && 'message' in ctx.callbackQuery) {
+      await ctx.answerCallbackQuery("Перевод контента...");
+      await ctx.reply("Перевожу содержимое изображения на русский язык...");
+      
+      const messageWithImage = ctx.callbackQuery.message?.reply_to_message;
+      if (messageWithImage && 'photo' in messageWithImage) {
+        // Process with translation prompt
+        await handleAIRequest(ctx, "Переведи весь текст на этом изображении на русский язык");
+      } else {
+        await ctx.reply("Не могу найти оригинальное изображение для перевода.");
+      }
     }
+  } catch (error) {
+    console.error('Ошибка при обработке кнопки "Перевести":', error);
+    await ctx.reply('Произошла ошибка. Пожалуйста, попробуйте еще раз.');
   }
 });
 
 // Handle /ai command in groups and direct messages
 bot.command('ai', async (ctx: MyContext) => {
-  // Skip if not allowed group
-  if (!isAllowedGroup(ctx)) return;
-  
-  const queryText = ctx.match;
-  
-  if (!queryText || typeof queryText !== 'string') {
-    await ctx.reply('Пожалуйста, укажите запрос после команды /ai. Например: /ai Какая столица Франции?');
-    return;
+  try {
+    // Skip if not allowed group
+    if (!isAllowedGroup(ctx)) return;
+    
+    const queryText = ctx.match;
+    
+    if (!queryText || typeof queryText !== 'string') {
+      await ctx.reply('Пожалуйста, укажите запрос после команды /ai. Например: /ai Какая столица Франции?');
+      return;
+    }
+    
+    await handleAIRequest(ctx, queryText);
+  } catch (error) {
+    console.error('Ошибка при обработке команды /ai:', error);
+    await ctx.reply('Произошла ошибка при обработке команды. Пожалуйста, попробуйте еще раз.');
   }
-  
-  await handleAIRequest(ctx, queryText);
 });
 
 // Handler for AI requests
 async function handleAIRequest(ctx: MyContext, query: string) {
-  if (ctx.session.waitingForCompletion) {
-    await ctx.reply("Я все еще обрабатываю ваш предыдущий запрос. Пожалуйста, подождите.");
-    return;
-  }
-  
   try {
+    if (ctx.session.waitingForCompletion) {
+      await ctx.reply("Я все еще обрабатываю ваш предыдущий запрос. Пожалуйста, подождите.");
+      return;
+    }
+    
     // Set waiting status
     ctx.session.waitingForCompletion = true;
     
@@ -375,8 +455,12 @@ async function handleAIRequest(ctx: MyContext, query: string) {
     });
     
     // Delete the status message
-    if (ctx.chat) {
-      await ctx.api.deleteMessage(ctx.chat.id, statusMsg.message_id);
+    if (ctx.chat && statusMsg) {
+      try {
+        await ctx.api.deleteMessage(ctx.chat.id, statusMsg.message_id);
+      } catch (error) {
+        console.error('Не удалось удалить статусное сообщение:', error);
+      }
     }
     
     // Send the AI response
@@ -399,6 +483,11 @@ async function callOpenRouterAPI(chatHistory: SessionData['chatHistory']): Promi
     // Prepare the context from chat history
     const messages = prepareMessages(chatHistory);
     
+    console.log('Отправка запроса в OpenRouter API', {
+      model: 'meta-llama/llama-4-maverick:free',
+      messagesCount: messages.length
+    });
+    
     const response = await axios.post(
       'https://openrouter.ai/api/v1/chat/completions',
       {
@@ -412,8 +501,14 @@ async function callOpenRouterAPI(chatHistory: SessionData['chatHistory']): Promi
           'X-Title': YOUR_SITE_NAME,
           'Content-Type': 'application/json',
         },
+        timeout: 60000 // 60 секунд таймаут
       }
     );
+
+    if (!response.data || !response.data.choices || !response.data.choices[0]) {
+      console.error('Некорректный ответ от OpenRouter API:', response.data);
+      return 'Нет ответа от ИИ';
+    }
 
     return response.data.choices[0].message.content || 'Нет ответа от ИИ';
   } catch (error) {
@@ -428,32 +523,33 @@ async function callOpenRouterAPIWithImage(chatHistory: SessionData['chatHistory'
     // Prepare the context from chat history
     const messages = prepareMessages(chatHistory);
     
-    // Добавляем изображение к последнему сообщению пользователя
-    if (messages.length > 0) {
-      const lastMessage = messages[messages.length - 1];
-      
-      // Создаем новое сообщение с изображением
-      const newMessage = {
-        role: 'user',
-        content: [
-          { type: 'text', text: query },
-          { type: 'image_url', image_url: { url: imageUrl } }
-        ]
-      };
-      
-      // Заменяем последнее сообщение или добавляем новое
-      if (lastMessage.role === 'user') {
-        messages[messages.length - 1] = newMessage;
-      } else {
-        messages.push(newMessage);
-      }
-    }
+    // Создаем новое изображение с сообщением
+    const imageMessage: ApiMessage = {
+      role: 'user',
+      content: [
+        { type: 'text', text: query },
+        { type: 'image_url', image_url: { url: imageUrl } }
+      ]
+    };
+    
+    // Удаляем последнее сообщение пользователя (если есть) и добавляем новое с изображением
+    const filteredMessages = messages.filter((msg, idx, arr) => 
+      !(msg.role === 'user' && idx === arr.length - 1)
+    );
+    
+    filteredMessages.push(imageMessage);
+    
+    console.log('Отправка запроса с изображением в OpenRouter API', {
+      model: 'meta-llama/llama-4-maverick:free',
+      messagesCount: filteredMessages.length,
+      imageUrl: imageUrl.substring(0, 50) + '...' // Укороченный URL для лога
+    });
     
     const response = await axios.post(
       'https://openrouter.ai/api/v1/chat/completions',
       {
         model: 'meta-llama/llama-4-maverick:free',
-        messages: messages
+        messages: filteredMessages
       },
       {
         headers: {
@@ -462,8 +558,14 @@ async function callOpenRouterAPIWithImage(chatHistory: SessionData['chatHistory'
           'X-Title': YOUR_SITE_NAME,
           'Content-Type': 'application/json',
         },
+        timeout: 90000 // 90 секунд таймаут для изображений
       }
     );
+
+    if (!response.data || !response.data.choices || !response.data.choices[0]) {
+      console.error('Некорректный ответ от OpenRouter API:', response.data);
+      return 'Нет ответа от ИИ';
+    }
 
     return response.data.choices[0].message.content || 'Нет ответа от ИИ';
   } catch (error) {
@@ -473,10 +575,10 @@ async function callOpenRouterAPIWithImage(chatHistory: SessionData['chatHistory'
 }
 
 // Prepare messages for API
-function prepareMessages(chatHistory: SessionData['chatHistory']) {
+function prepareMessages(chatHistory: SessionData['chatHistory']): ApiMessage[] {
   // Add system message first
-  const systemMessage = {
-    role: 'system' as const,
+  const systemMessage: ApiMessage = {
+    role: 'system',
     content: `Ты ${BOT_NAME}, ИИ-ассистент на базе ${BOT_PLATFORM}, созданный компанией ${BOT_CREATOR}. 
 Отвечай на русском языке. Всегда полезен и дружелюбен.
 У тебя есть следующие возможности:
@@ -486,10 +588,13 @@ function prepareMessages(chatHistory: SessionData['chatHistory']) {
 4. Поддерживать контекст разговора`
   };
   
-  // Convert messages to OpenRouter format
-  const apiMessages = [systemMessage];
+  // Создаем копию сообщений
+  const apiMessages: ApiMessage[] = [systemMessage];
   
-  for (const msg of chatHistory) {
+  // Берем последние N сообщений, чтобы не превысить лимит токенов
+  const recentMessages = chatHistory.slice(-10);
+  
+  for (const msg of recentMessages) {
     apiMessages.push({
       role: msg.role,
       content: msg.content
@@ -502,7 +607,12 @@ function prepareMessages(chatHistory: SessionData['chatHistory']) {
 // Обработчик вебхука для Vercel
 async function handleWebhook(req: any, res: any) {
   try {
-    console.log('Обработка вебхука Telegram');
+    console.log('Обработка вебхука Telegram', {
+      method: req.method,
+      hasBody: !!req.body,
+      bodyType: typeof req.body,
+      updateId: req.body?.update_id
+    });
     
     // Проверяем, что запрос содержит обновление
     if (!req.body) {
@@ -530,11 +640,9 @@ if (IS_VERCEL) {
   console.log(`Бот работает в режиме вебхуков на ${WEBHOOK_URL}`);
   
   // Экспорт для Vercel API endpoint
-  const webhookHandler = async (req: any, res: any) => {
+  module.exports = async (req: any, res: any) => {
     await handleWebhook(req, res);
   };
-  
-  module.exports = webhookHandler;
 } else {
   // Local mode: use long polling
   bot.start({
