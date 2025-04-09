@@ -16,19 +16,33 @@ if (!TELEGRAM_BOT_TOKEN || !OPENROUTER_API_KEY) {
 // Инициализация бота
 const bot = new Bot(TELEGRAM_BOT_TOKEN);
 
+// Просто логирование для отладки
+bot.use(async (ctx, next) => {
+  console.log('Получен запрос:', ctx.update.update_id, JSON.stringify(ctx.message?.text).substring(0, 30));
+  await next();
+  console.log('Запрос обработан:', ctx.update.update_id);
+});
+
 // Обработка команды /start
 bot.command("start", async (ctx) => {
   await ctx.reply(`👋 Привет! Я ARK-1, ИИ-ассистент. Отправь мне сообщение или фото.`);
+  console.log('Команда start обработана');
 });
 
-// Обработка обычных текстовых сообщений
+// Обработка ВСЕХ текстовых сообщений
 bot.on('message:text', async (ctx) => {
-  // Пропускаем команды
-  const text = ctx.message.text;
-  if (text.startsWith('/')) return;
+  const text = ctx.message.text || '';
+  
+  // Пропускаем ТОЛЬКО команды, на ВСЁ остальное отвечаем
+  if (text.startsWith('/')) {
+    console.log('Пропуск команды:', text);
+    return;
+  }
+  
+  console.log('Обработка текста:', text.substring(0, 30));
   
   try {
-    // Показываем что печатаем
+    // Мгновенно начинаем печатать
     await ctx.api.sendChatAction(ctx.chat.id, "typing");
     
     // Быстрый запрос к API
@@ -53,27 +67,29 @@ bot.on('message:text', async (ctx) => {
           'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
           'Content-Type': 'application/json',
         },
-        timeout: 15000 // Уменьшаем таймаут до 15 секунд
+        timeout: 10000 // Еще меньше таймаут - 10 секунд
       }
     );
     
     // Мгновенно отвечаем пользователю
     const responseText = response.data.choices[0].message.content || 'Нет ответа';
     await ctx.reply(responseText);
+    console.log('Отправлен ответ:', responseText.substring(0, 30));
     
   } catch (error) {
-    console.error('Ошибка:', error);
-    await ctx.reply('Ошибка при обработке запроса. Попробуйте еще раз позже.');
+    console.error('Ошибка при обработке текста:', error.message);
+    await ctx.reply('Ошибка при обработке запроса. Пожалуйста, попробуйте еще раз.');
   }
 });
 
 // Обработка фото
 bot.on('message:photo', async (ctx) => {
+  console.log('Обработка фото');
   try {
     // Показываем что печатаем
     await ctx.api.sendChatAction(ctx.chat.id, "typing");
     
-    // Получаем фото максимально быстро
+    // Получаем фото
     const photoInfo = ctx.message.photo;
     const fileId = photoInfo[photoInfo.length - 1].file_id;
     const fileInfo = await ctx.api.getFile(fileId);
@@ -88,7 +104,7 @@ bot.on('message:photo', async (ctx) => {
     // Получаем подпись или стандартный текст
     const caption = ctx.message.caption || "Опиши, что на этом изображении";
     
-    // Отправляем простой запрос с изображением
+    // Быстрый запрос с изображением
     const response = await axios.post(
       'https://openrouter.ai/api/v1/chat/completions',
       {
@@ -113,32 +129,47 @@ bot.on('message:photo', async (ctx) => {
           'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
           'Content-Type': 'application/json',
         },
-        timeout: 20000 // Уменьшаем таймаут до 20 секунд
+        timeout: 15000 // Еще быстрее - 15 секунд
       }
     );
     
     // Отвечаем пользователю
     const responseText = response.data.choices[0].message.content || 'Нет ответа';
     await ctx.reply(responseText);
+    console.log('Отправлен ответ на фото');
     
   } catch (error) {
-    console.error('Ошибка при обработке изображения:', error);
-    await ctx.reply('Ошибка при обработке изображения. Попробуйте другое фото или позже.');
+    console.error('Ошибка при обработке изображения:', error.message);
+    await ctx.reply('Ошибка при обработке изображения. Попробуйте другое фото.');
   }
 });
 
+// Обработка всех остальных сообщений
+bot.on('message', async (ctx) => {
+  console.log('Получено сообщение другого типа');
+  await ctx.reply('Отправьте мне текст или изображение.');
+});
+
+// Хендлер любых ошибок бота
+bot.catch((err) => {
+  console.error('Ошибка бота:', err);
+});
+
 // Обработка вебхуков от Telegram
-module.exports = async (req: any, res: any) => {
+module.exports = async (req, res) => {
   // Сразу отвечаем OK для избежания таймаутов
   res.status(200).send('OK');
   
   // Обрабатываем запрос асинхронно
   try {
     if (req.body) {
+      console.log('Получен вебхук:', req.body.update_id);
       await bot.handleUpdate(req.body);
+    } else {
+      console.error('Пустой запрос без тела');
     }
   } catch (error) {
-    console.error('Ошибка вебхука:', error);
+    console.error('Ошибка вебхука:', error.message);
   }
 };
 
