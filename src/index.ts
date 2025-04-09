@@ -29,10 +29,13 @@ interface ApiMessage {
   content: string | MessageContent[];
 }
 
-// Расширенная сессия с историей чатов
+// Расширенная сессия с историей чатов и кешем
 interface SessionData {
   waitingForCompletion: boolean;
   chatHistory: ApiMessage[];
+  // Для предотвращения дублирования
+  processedMessageIds: Set<number>;
+  lastUpdateId?: number;
 }
 
 // Расширенный контекст для бота
@@ -59,6 +62,9 @@ const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const YOUR_SITE_URL = process.env.YOUR_SITE_URL || 'https://tgaibot.example.com';
 const YOUR_SITE_NAME = process.env.YOUR_SITE_NAME || 'TelegramAIBot';
 
+// Глобальный кеш для предотвращения дублирования запросов
+const processedUpdates = new Set<number>();
+
 if (!TELEGRAM_BOT_TOKEN || !OPENROUTER_API_KEY) {
   console.error('Ошибка: TELEGRAM_BOT_TOKEN или OPENROUTER_API_KEY не указаны в файле .env');
   process.exit(1);
@@ -71,9 +77,50 @@ const bot = new Bot<MyContext>(TELEGRAM_BOT_TOKEN);
 bot.use(session({
   initial: (): SessionData => ({
     waitingForCompletion: false,
-    chatHistory: []
+    chatHistory: [],
+    processedMessageIds: new Set()
   }),
 }));
+
+// Middleware для предотвращения дублирования сообщений
+bot.use(async (ctx, next) => {
+  // Проверяем, не обрабатывали ли мы уже это обновление
+  if (ctx.update.update_id) {
+    if (processedUpdates.has(ctx.update.update_id)) {
+      console.log(`Пропуск дубликата обновления ID: ${ctx.update.update_id}`);
+      return;
+    }
+    
+    // Запоминаем ID обновления
+    processedUpdates.add(ctx.update.update_id);
+    
+    // Ограничиваем размер кеша
+    if (processedUpdates.size > 1000) {
+      const iter = processedUpdates.values();
+      processedUpdates.delete(iter.next().value);
+    }
+  }
+  
+  // Проверяем, не обрабатывали ли мы уже это сообщение
+  if (ctx.message?.message_id) {
+    if (ctx.session.processedMessageIds.has(ctx.message.message_id)) {
+      console.log(`Пропуск дубликата сообщения ID: ${ctx.message.message_id}`);
+      return;
+    }
+    
+    // Запоминаем ID сообщения
+    ctx.session.processedMessageIds.add(ctx.message.message_id);
+    
+    // Ограничиваем размер кеша
+    if (ctx.session.processedMessageIds.size > 100) {
+      const iter = ctx.session.processedMessageIds.values();
+      ctx.session.processedMessageIds.delete(iter.next().value);
+    }
+  }
+  
+  // Продолжаем обработку
+  await next();
+});
 
 // Check if message is from allowed group
 function isAllowedGroup(ctx: MyContext): boolean {
@@ -299,14 +346,32 @@ bot.on('message:photo', async (ctx: MyContext) => {
     // Get caption if any, or use default
     const caption = ctx.message.caption || "Опиши, что на этом изображении";
     
+    // Сообщаем, что запрос принят и будет обработан
+    const statusMsg = await ctx.reply("Обрабатываю изображение... Это может занять до 30 секунд.");
+    
+    // Обрабатываем запрос асинхронно
+    processImageRequest(ctx, caption, photoUrl, statusMsg.message_id).catch(error => {
+      console.error('Ошибка при асинхронной обработке изображения:', error);
+    });
+    
+    // Быстро отвечаем на вебхук, не дожидаясь завершения обработки
+    return;
+    
+  } catch (error) {
+    console.error('Ошибка при обработке изображения:', error);
+    ctx.session.waitingForCompletion = false;
+    await ctx.reply('Извините, произошла ошибка при обработке вашего изображения. Пожалуйста, попробуйте еще раз позже.');
+  }
+});
+
+// Асинхронная обработка запроса с изображением
+async function processImageRequest(ctx: MyContext, caption: string, photoUrl: string, statusMsgId: number) {
+  try {
     // Save user query to history
     ctx.session.chatHistory.push({
       role: 'user',
       content: `[Отправлено изображение] ${caption}`
     });
-    
-    // Notify user that we're processing
-    const statusMsg = await ctx.reply("Обрабатываю изображение...");
     
     // Call OpenRouter API with the image
     const response = await callOpenRouterAPIWithImage(ctx.session.chatHistory, caption, photoUrl);
@@ -318,9 +383,9 @@ bot.on('message:photo', async (ctx: MyContext) => {
     });
     
     // Delete the status message
-    if (ctx.chat && statusMsg) {
+    if (ctx.chat) {
       try {
-        await ctx.api.deleteMessage(ctx.chat.id, statusMsg.message_id);
+        await ctx.api.deleteMessage(ctx.chat.id, statusMsgId);
       } catch (error) {
         console.error('Не удалось удалить статусное сообщение:', error);
       }
@@ -336,23 +401,21 @@ bot.on('message:photo', async (ctx: MyContext) => {
       parse_mode: 'Markdown',
       reply_markup: inlineKeyboard,
     });
+    
+    // Always show main keyboard after processing
+    await ctx.reply("Что бы вы хотели сделать дальше?", {
+      reply_markup: getMainKeyboard(),
+    });
   } catch (error) {
-    console.error('Ошибка при обработке изображения:', error);
-    await ctx.reply('Извините, произошла ошибка при обработке вашего изображения. Пожалуйста, попробуйте еще раз позже.');
+    console.error('Ошибка при асинхронной обработке изображения:', error);
+    await ctx.reply('Извините, произошла ошибка при обработке вашего изображения. Пожалуйста, попробуйте еще раз позже.', {
+      reply_markup: getMainKeyboard(),
+    });
   } finally {
     // Reset waiting status
     ctx.session.waitingForCompletion = false;
-    
-    try {
-      // Always show main keyboard after processing
-      await ctx.reply("Что бы вы хотели сделать дальше?", {
-        reply_markup: getMainKeyboard(),
-      });
-    } catch (error) {
-      console.error('Ошибка при отправке финального сообщения:', error);
-    }
   }
-});
+}
 
 // Handle inline keyboard callbacks
 bot.callbackQuery("more_details", async (ctx: MyContext) => {
@@ -413,7 +476,13 @@ bot.command('ai', async (ctx: MyContext) => {
       return;
     }
     
-    await handleAIRequest(ctx, queryText);
+    // Обрабатываем запрос асинхронно
+    const statusMsg = await ctx.reply("Обрабатываю ваш запрос...");
+    
+    processAIRequest(ctx, queryText, statusMsg.message_id).catch(error => {
+      console.error('Ошибка при асинхронной обработке AI запроса:', error);
+    });
+    
   } catch (error) {
     console.error('Ошибка при обработке команды /ai:', error);
     await ctx.reply('Произошла ошибка при обработке команды. Пожалуйста, попробуйте еще раз.');
@@ -436,14 +505,29 @@ async function handleAIRequest(ctx: MyContext, query: string) {
       await ctx.api.sendChatAction(ctx.chat.id, "typing");
     }
     
+    // Notify user that we're processing
+    const statusMsg = await ctx.reply("Обрабатываю ваш запрос...");
+    
+    // Обрабатываем запрос асинхронно
+    processAIRequest(ctx, query, statusMsg.message_id).catch(error => {
+      console.error('Ошибка при асинхронной обработке AI запроса:', error);
+    });
+    
+  } catch (error) {
+    console.error('Ошибка при обработке запроса:', error);
+    ctx.session.waitingForCompletion = false;
+    await ctx.reply('Извините, произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте еще раз позже.');
+  }
+}
+
+// Асинхронная обработка текстового запроса
+async function processAIRequest(ctx: MyContext, query: string, statusMsgId: number) {
+  try {
     // Save user query to history
     ctx.session.chatHistory.push({
       role: 'user',
       content: query
     });
-    
-    // Notify user that we're processing
-    const statusMsg = await ctx.reply("Обрабатываю ваш запрос...");
     
     // Call OpenRouter API
     const response = await callOpenRouterAPI(ctx.session.chatHistory);
@@ -455,9 +539,9 @@ async function handleAIRequest(ctx: MyContext, query: string) {
     });
     
     // Delete the status message
-    if (ctx.chat && statusMsg) {
+    if (ctx.chat) {
       try {
-        await ctx.api.deleteMessage(ctx.chat.id, statusMsg.message_id);
+        await ctx.api.deleteMessage(ctx.chat.id, statusMsgId);
       } catch (error) {
         console.error('Не удалось удалить статусное сообщение:', error);
       }
@@ -470,7 +554,9 @@ async function handleAIRequest(ctx: MyContext, query: string) {
     });
   } catch (error) {
     console.error('Ошибка при обработке запроса:', error);
-    await ctx.reply('Извините, произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте еще раз позже.');
+    await ctx.reply('Извините, произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте еще раз позже.', {
+      reply_markup: getMainKeyboard(),
+    });
   } finally {
     // Reset waiting status
     ctx.session.waitingForCompletion = false;
@@ -501,7 +587,7 @@ async function callOpenRouterAPI(chatHistory: SessionData['chatHistory']): Promi
           'X-Title': YOUR_SITE_NAME,
           'Content-Type': 'application/json',
         },
-        timeout: 60000 // 60 секунд таймаут
+        timeout: 30000 // 30 секунд таймаут (уменьшен с 60 секунд)
       }
     );
 
@@ -558,7 +644,7 @@ async function callOpenRouterAPIWithImage(chatHistory: SessionData['chatHistory'
           'X-Title': YOUR_SITE_NAME,
           'Content-Type': 'application/json',
         },
-        timeout: 90000 // 90 секунд таймаут для изображений
+        timeout: 45000 // 45 секунд таймаут (уменьшен с 90 секунд)
       }
     );
 
@@ -592,7 +678,7 @@ function prepareMessages(chatHistory: SessionData['chatHistory']): ApiMessage[] 
   const apiMessages: ApiMessage[] = [systemMessage];
   
   // Берем последние N сообщений, чтобы не превысить лимит токенов
-  const recentMessages = chatHistory.slice(-10);
+  const recentMessages = chatHistory.slice(-5); // Сокращено до 5 сообщений для ускорения
   
   for (const msg of recentMessages) {
     apiMessages.push({
@@ -607,6 +693,9 @@ function prepareMessages(chatHistory: SessionData['chatHistory']): ApiMessage[] 
 // Обработчик вебхука для Vercel
 async function handleWebhook(req: any, res: any) {
   try {
+    // Быстро отвечаем, что получили запрос (для предотвращения повторных вебхуков)
+    res.status(200).send('OK');
+    
     console.log('Обработка вебхука Telegram', {
       method: req.method,
       hasBody: !!req.body,
@@ -614,19 +703,29 @@ async function handleWebhook(req: any, res: any) {
       updateId: req.body?.update_id
     });
     
+    // Проверяем дублирование запроса
+    if (req.body?.update_id && processedUpdates.has(req.body.update_id)) {
+      console.log(`Вебхук: пропуск дубликата обновления ID: ${req.body.update_id}`);
+      return;
+    }
+    
+    // Запоминаем ID обновления
+    if (req.body?.update_id) {
+      processedUpdates.add(req.body.update_id);
+    }
+    
     // Проверяем, что запрос содержит обновление
     if (!req.body) {
       throw new Error('Отсутствует тело запроса');
     }
     
-    // Обрабатываем обновление
-    await bot.handleUpdate(req.body);
+    // Обрабатываем обновление асинхронно
+    bot.handleUpdate(req.body).catch(error => {
+      console.error('Ошибка при асинхронной обработке вебхука:', error);
+    });
     
-    // Отвечаем Telegram, что получили запрос
-    res.status(200).send('OK');
   } catch (error) {
     console.error('Ошибка при обработке вебхука:', error);
-    res.status(500).send(`Ошибка обработки: ${error.message}`);
   }
 }
 
@@ -653,6 +752,16 @@ if (IS_VERCEL) {
     },
   });
 }
+
+// Регулярно очищаем кеш обработанных сообщений
+setInterval(() => {
+  if (processedUpdates.size > 500) {
+    console.log(`Очистка кеша обновлений: ${processedUpdates.size} -> 100`);
+    const toKeep = Array.from(processedUpdates).slice(-100);
+    processedUpdates.clear();
+    toKeep.forEach(id => processedUpdates.add(id));
+  }
+}, 60000); // Очищаем каждую минуту
 
 // Error handling
 process.on('uncaughtException', (error: Error) => {
